@@ -1,0 +1,28 @@
+# Android build outputs / local config
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/.idea/
+android/*.iml
+android/app/*.iml
+android/captures/
+android/.cxx/
+
+# Large model asset (100MB+, over GitHub's limit) — regenerate with backend/export_onnx.py
+# then copy backend/onnx_model/model_int8.onnx to android/app/src/main/assets/phoneme_model.onnx
+android/app/src/main/assets/phoneme_model.onnx
+
+# Python
+backend/__pycache__/
+backend/onnx_model/
+backend/server.log
+backend/*.pyc
+
+# Scratch/debug recordings
+backend/phone_*.wav
+backend/cand_*.wav
+
+# Scratch build logs from local rebuild iterations
+android/build*.log
+

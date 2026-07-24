@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+python-multipart
+torch
+torchaudio
+transformers
+g2p_en
+nltk

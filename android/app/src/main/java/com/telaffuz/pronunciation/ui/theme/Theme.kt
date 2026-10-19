@@ -1,4 +1,4 @@
-package com.telaffuz.pronunciation
+package com.telaffuz.pronunciation.ui.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography

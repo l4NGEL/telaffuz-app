@@ -1,4 +1,4 @@
-package com.telaffuz.pronunciation
+package com.telaffuz.pronunciation.domain
 
 /** wav2vec2-base-timit-phoneme-arpa-39 modelinin fonem sözlüğü (id 0-39). */
 object Vocab {

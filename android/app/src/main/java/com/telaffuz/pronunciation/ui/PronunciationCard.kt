@@ -1,4 +1,4 @@
-package com.telaffuz.pronunciation
+package com.telaffuz.pronunciation.ui
 
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.background
@@ -33,6 +33,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.telaffuz.pronunciation.domain.model.ScoreResult
+import com.telaffuz.pronunciation.domain.model.WordResult
+import com.telaffuz.pronunciation.ui.theme.BrandPurple
+import com.telaffuz.pronunciation.ui.theme.BrandRed
+import com.telaffuz.pronunciation.ui.theme.SurfaceCard
 
 @Composable
 fun PronunciationCard(result: ScoreResult, modifier: Modifier = Modifier) {

@@ -1,57 +1,29 @@
-package com.telaffuz.pronunciation
+package com.telaffuz.pronunciation.domain
 
-import ai.onnxruntime.OnnxTensor
-import ai.onnxruntime.OrtEnvironment
-import ai.onnxruntime.OrtSession
-import android.content.Context
-import java.io.File
-import java.nio.FloatBuffer
+import com.telaffuz.pronunciation.domain.model.PhoneResult
+import com.telaffuz.pronunciation.domain.model.ScoreResult
+import com.telaffuz.pronunciation.domain.model.WordResult
 import kotlin.math.exp
 import kotlin.math.ln
 
 class UnknownWordException(val words: List<String>) :
     Exception("Sözlükte olmayan kelime(ler): ${words.joinToString(", ")}. Başka bir kelime/cümle deneyin.")
 
-object OnDeviceScorer {
-    private var session: OrtSession? = null
-    private var env: OrtEnvironment? = null
-
-    @Synchronized
-    private fun getSession(context: Context): OrtSession {
-        session?.let { return it }
-        val ortEnv = OrtEnvironment.getEnvironment()
-        env = ortEnv
-        val modelFile = ensureModelFile(context)
-        val sess = ortEnv.createSession(modelFile.absolutePath, OrtSession.SessionOptions())
-        session = sess
-        return sess
-    }
-
-    /**
-     * 120MB'lık modeli tek seferde ByteArray'e okumak Android'in Java heap limitini
-     * aşıp OutOfMemoryError atıyor. Bunun yerine dosyayı (küçük bir tampon ile,
-     * belleğe tek parça yüklemeden) internal storage'a bir kez kopyalayıp ONNX
-     * Runtime'ın dosya yolundan (memory-map ile) yüklemesini sağlıyoruz.
-     */
-    private fun ensureModelFile(context: Context): File {
-        val outFile = File(context.filesDir, "phoneme_model.onnx")
-        val assetSize = context.assets.open("phoneme_model.onnx").use { it.available().toLong() }
-        if (outFile.exists() && outFile.length() == assetSize) {
-            return outFile
-        }
-        context.assets.open("phoneme_model.onnx").use { input ->
-            outFile.outputStream().use { output ->
-                input.copyTo(output, bufferSize = 1 shl 20)
-            }
-        }
-        return outFile
-    }
+/**
+ * Metin + ses örnekleri -> fonem bazında telaffuz puanı. Saf Kotlin: sözlük ve akustik
+ * model arayüz olarak enjekte edildiği için JVM birim testlerinde sahte logit
+ * matrisleriyle uçtan uca çalıştırılabiliyor.
+ */
+class ScorePronunciationUseCase(
+    private val dictionary: PhonemeDictionary,
+    private val model: AcousticModel,
+    private val sampleRate: Int = 16000,
+    private val padSeconds: Float = 0.4f,
+) : PronunciationScorer {
 
     private data class WordPhones(val word: String, val phoneIndices: List<Int>)
 
-    fun score(context: Context, text: String, wavFile: File): ScoreResult {
-        val cmu = CmuDict.load(context)
-
+    override fun score(text: String, samples: FloatArray): ScoreResult {
         val words = mutableListOf<WordPhones>()
         val targetIds = mutableListOf<Int>()
         val unknownWords = mutableListOf<String>()
@@ -60,7 +32,7 @@ object OnDeviceScorer {
             if (rawWord.isEmpty()) continue
             val cleaned = rawWord.lowercase().filter { it.isLetter() || it == '\'' }
             if (cleaned.isEmpty()) continue
-            val phones = cmu[cleaned]
+            val phones = dictionary.phonesFor(cleaned)
             if (phones == null) {
                 unknownWords.add(rawWord)
                 continue
@@ -81,24 +53,7 @@ object OnDeviceScorer {
             throw IllegalArgumentException("Skorlanacak fonem bulunamadı")
         }
 
-        val rawSamples = WavUtils.readPcm16Wav(wavFile)
-        val paddedSamples = WavUtils.padAudio(rawSamples, 16000, 0.4f)
-
-        val sess = getSession(context)
-        val ortEnv = env!!
-
-        val inputShape = longArrayOf(1, paddedSamples.size.toLong())
-        val inputTensor = OnnxTensor.createTensor(ortEnv, FloatBuffer.wrap(paddedSamples), inputShape)
-
-        val logits: Array<FloatArray>
-        inputTensor.use { tensor ->
-            sess.run(mapOf("input_values" to tensor)).use { output ->
-                @Suppress("UNCHECKED_CAST")
-                val logitsTensor = output.get("logits").get() as OnnxTensor
-                val raw = logitsTensor.value as Array<Array<FloatArray>> // [1][T][V]
-                logits = raw[0]
-            }
-        }
+        val logits = model.logits(padAudio(samples, sampleRate, padSeconds))
 
         val logProbs = Array(logits.size) { t -> logSoftmax(logits[t]) }
         val targetArray = targetIds.toIntArray()
@@ -160,10 +115,10 @@ object OnDeviceScorer {
                     //   aralığa girebiliyor, gerçek kayıtlarla doğrulandı) — "sen" boş kalır,
                     //   ama hedefin kendi güveni puana dahil edilmeye devam eder.
                     // >=%50: gerçekten güvenilir bir tespit, farklıysa kırmızı gösteriyoruz.
-                    if (bestAvg >= 0.50) {
+                    if (bestAvg >= HEARD_MIN_PROB) {
                         heardPhone = bestPhone
                         heardConf = (bestAvg * 100).toInt().coerceIn(0, 100)
-                    } else if (bestAvg < 0.02) {
+                    } else if (bestAvg < NO_SIGNAL_PROB) {
                         lowSignal = true
                     }
                 }
@@ -175,7 +130,7 @@ object OnDeviceScorer {
                 // ama düşükse (telaffuz hatası değil, kenar etkisi olduğu için) puana
                 // dahil etmiyoruz.
                 val isUtteranceEdge = idx == 0 || idx == targetArray.size - 1
-                if (isUtteranceEdge && conf < 40) {
+                if (isUtteranceEdge && conf < EDGE_MIN_CONF) {
                     lowSignal = true
                 }
 
@@ -192,12 +147,26 @@ object OnDeviceScorer {
         return ScoreResult(text, overall10, wordResults)
     }
 
-    private fun logSoftmax(logits: FloatArray): FloatArray {
-        var maxVal = Float.NEGATIVE_INFINITY
-        for (v in logits) if (v > maxVal) maxVal = v
-        var sumExp = 0.0
-        for (v in logits) sumExp += exp((v - maxVal).toDouble())
-        val logSumExp = maxVal + ln(sumExp).toFloat()
-        return FloatArray(logits.size) { i -> logits[i] - logSumExp }
+    companion object {
+        const val HEARD_MIN_PROB = 0.50
+        const val NO_SIGNAL_PROB = 0.02
+        const val EDGE_MIN_CONF = 40
+
+        /** Modelin ilk/son sesi bağlamsız kalmasın diye iki uca sessizlik ekler. */
+        fun padAudio(samples: FloatArray, sampleRate: Int = 16000, padSeconds: Float = 0.4f): FloatArray {
+            val padSamples = (sampleRate * padSeconds).toInt()
+            val result = FloatArray(samples.size + 2 * padSamples)
+            samples.copyInto(result, padSamples)
+            return result
+        }
+
+        internal fun logSoftmax(logits: FloatArray): FloatArray {
+            var maxVal = Float.NEGATIVE_INFINITY
+            for (v in logits) if (v > maxVal) maxVal = v
+            var sumExp = 0.0
+            for (v in logits) sumExp += exp((v - maxVal).toDouble())
+            val logSumExp = maxVal + ln(sumExp).toFloat()
+            return FloatArray(logits.size) { i -> logits[i] - logSumExp }
+        }
     }
 }

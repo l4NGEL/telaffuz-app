@@ -1,4 +1,4 @@
-package com.telaffuz.pronunciation
+package com.telaffuz.pronunciation.domain.model
 
 data class PhoneResult(
     val phone: String,

@@ -1,6 +1,7 @@
-package com.telaffuz.pronunciation
+package com.telaffuz.pronunciation.ui
 
 import androidx.compose.ui.graphics.Color
+import com.telaffuz.pronunciation.domain.model.PhoneResult
 
 val ARPA_TO_TR: Map<String, String> = mapOf(
     "aa" to "a", "ae" to "e", "ah" to "a", "ao" to "o", "aw" to "au", "ay" to "ay",

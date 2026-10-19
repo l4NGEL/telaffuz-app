@@ -80,11 +80,35 @@ cp onnx_model/model_int8.onnx ../android/app/src/main/assets/phoneme_model.onnx
 
 Sonra `android/` klasörünü Android Studio ile açıp normal şekilde derleyip çalıştırabilirsiniz.
 
+Birim testleri cihaz/emülatör gerektirmez (JVM üzerinde çalışır, model dosyası da gerekmez):
+
+```bash
+cd android
+gradle :app:testDebugUnitTest
+```
+
+## Uygulama mimarisi
+
+Tek modüllü, katmanlı MVVM. Bağımlılıklar tek yönde: `ui → domain ← data`.
+
+```
+ui/      Compose ekranı (durumsuz) + PronunciationViewModel (StateFlow<PronunciationUiState>)
+domain/  ScorePronunciationUseCase, ForcedAligner, Vocab — saf Kotlin, Android bağımlılığı yok
+         Ports.kt: PhonemeDictionary, AcousticModel, AudioRecorder, PronunciationScorer arayüzleri
+data/    CmuDictionary (assets), OnnxAcousticModel (ONNX Runtime), AndroidWavRecorder (AudioRecord), WavCodec
+```
+
+- Ekran yalnızca `PronunciationUiState`'i çizer ve olayları ViewModel'e iletir. Kayıt → bitiriyor → işleniyor → tamamlandı/hata akışı tek bir `Phase` alanında tutulur, bu yüzden "işlem sürerken tekrar bas" gibi geçersiz geçişler ViewModel'de engellenir.
+- Skorlama mantığı (g2p, forced-alignment, karışıklık grubu, kenar etkisi, toplam puan) domain'de olduğu için JVM testlerinde sahte logit matrisleriyle uçtan uca test ediliyor; ONNX modeli ve mikrofon arayüzlerin arkasında.
+- Bağımlılıklar `AppContainer` içinde elle bağlanıyor (tek ekranlı uygulamada DI çerçevesi gerektirmiyor); sözlük ve ONNX oturumu uygulama ömrü boyunca tek örnek.
+
+Testler (`android/app/src/test`, 40 test): forced-alignment, skorlama kuralları, ViewModel durum geçişleri (`kotlinx-coroutines-test` sanal zamanla), WAV okuma/yazma, CMUdict ayrıştırma, Türkçe okunuş eşlemesi.
+
 ## Klasörler
 
-- `android/` — Kotlin + Jetpack Compose Android uygulaması (tüm işleme cihaz üzerinde: ONNX Runtime + CMUdict + Kotlin'de yazılmış CTC forced-align)
+- `android/` — Kotlin + Jetpack Compose Android uygulaması, MVVM (tüm işleme cihaz üzerinde: ONNX Runtime + CMUdict + Kotlin'de yazılmış CTC forced-align)
 - `backend/` — modeli ONNX'e çevirip doğrulamak için kullanılan Python script'leri (uygulamanın çalışması için gerekli değil, sadece geliştirme/model hazırlama aşamasında kullanılır)
 
 ## Kullanılan teknolojiler
 
-Kotlin · Jetpack Compose · ONNX Runtime (Android) · wav2vec2 · CTC forced-alignment · CMUdict
+Kotlin · Jetpack Compose · MVVM / ViewModel + StateFlow · Coroutines · JUnit · ONNX Runtime (Android) · wav2vec2 · CTC forced-alignment · CMUdict

@@ -1,4 +1,6 @@
-package com.telaffuz.pronunciation
+package com.telaffuz.pronunciation.domain
+
+import kotlin.random.Random
 
 val PRACTICE_SENTENCES = listOf(
     "THE CRIME RATE IS HIGH",
@@ -33,11 +35,26 @@ val PRACTICE_SENTENCES = listOf(
     "BEAUTIFUL MORNING",
 )
 
-fun randomPracticeSentence(exclude: String? = null): String {
-    if (PRACTICE_SENTENCES.size <= 1) return PRACTICE_SENTENCES.first()
-    var pick = PRACTICE_SENTENCES.random()
-    while (pick == exclude) {
-        pick = PRACTICE_SENTENCES.random()
+/** Sıradaki pratik cümlesini verir; bir öncekini (exclude) art arda tekrar etmez. */
+fun interface SentenceProvider {
+    fun next(exclude: String?): String
+}
+
+class RandomSentenceProvider(
+    private val sentences: List<String> = PRACTICE_SENTENCES,
+    private val random: Random = Random.Default,
+) : SentenceProvider {
+
+    init {
+        require(sentences.isNotEmpty()) { "Cümle listesi boş olamaz" }
     }
-    return pick
+
+    override fun next(exclude: String?): String {
+        if (sentences.size <= 1) return sentences.first()
+        var pick = sentences.random(random)
+        while (pick == exclude) {
+            pick = sentences.random(random)
+        }
+        return pick
+    }
 }
